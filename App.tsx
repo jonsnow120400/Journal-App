@@ -3,7 +3,7 @@ import { User, JournalEntry, ViewState, MOOD_EMOJIS } from './types';
 import * as storage from './services/storage';
 import * as gemini from './services/gemini';
 import { Button } from './components/Button';
-import { Trash2, Plus, LogOut, ArrowLeft, Sparkles, Pencil, Calendar, Loader2, Hash, X } from 'lucide-react';
+import { Trash2, Plus, LogOut, ArrowLeft, Sparkles, Pencil, Calendar, Loader2, Hash, X, Filter } from 'lucide-react';
 
 // --- Sub-Components ---
 
@@ -22,11 +22,13 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
     setLoading(true);
     
     if (!email || !password) {
@@ -51,10 +53,11 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
         }
         const { success, error } = await storage.registerUser(email, name, password);
         if (success) {
-          // Auto login after register or prompt user
-          const { user } = await storage.loginUser(email, password);
-          if (user) onLogin(user);
-          else setError("Account created! Please login.");
+          // In production, Supabase often requires email verification. 
+          // Instead of auto-logging in (which might fail), we guide the user.
+          setSuccessMsg("Account created! ✨ Please login.");
+          setIsLogin(true);
+          setPassword(''); 
         } else {
           setError(error || "Could not create user.");
         }
@@ -112,6 +115,7 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
             />
           </div>
 
+          {successMsg && <p className="text-acid-green text-sm font-mono bg-acid-green/10 p-3 rounded-xl border border-acid-green/20">{successMsg}</p>}
           {error && <p className="text-red-400 text-sm font-mono bg-red-500/10 p-3 rounded-xl border border-red-500/20">{error}</p>}
 
           <Button type="submit" className="w-full mt-4" isLoading={loading}>
@@ -121,7 +125,7 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
 
         <div className="mt-6 text-center">
           <button 
-            onClick={() => { setIsLogin(!isLogin); setError(''); }}
+            onClick={() => { setIsLogin(!isLogin); setError(''); setSuccessMsg(''); }}
             className="text-zinc-500 hover:text-white text-sm font-mono underline underline-offset-4 decoration-zinc-700 hover:decoration-white transition-all"
           >
             {isLogin ? "New here? Create account" : "Already have an account? Login"}
@@ -308,9 +312,10 @@ interface EntryCardProps {
   entry: JournalEntry;
   onClick: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  onTagClick: (tag: string) => void;
 }
 
-const EntryCard: React.FC<EntryCardProps> = ({ entry, onClick, onDelete }) => {
+const EntryCard: React.FC<EntryCardProps> = ({ entry, onClick, onDelete, onTagClick }) => {
   return (
     <div 
       onClick={onClick}
@@ -333,11 +338,15 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onClick, onDelete }) => {
 
       {/* Tags Display */}
       {entry.tags && entry.tags.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4 relative z-10">
           {entry.tags.slice(0, 3).map(tag => (
-            <span key={tag} className="text-[10px] uppercase tracking-wider text-acid-green/80 bg-acid-green/10 px-2 py-1 rounded-md">
+            <button 
+              key={tag} 
+              onClick={(e) => { e.stopPropagation(); onTagClick(tag); }}
+              className="text-[10px] uppercase tracking-wider text-acid-green/80 bg-acid-green/10 px-2 py-1 rounded-md hover:bg-acid-green hover:text-black transition-colors"
+            >
               #{tag}
-            </span>
+            </button>
           ))}
           {entry.tags.length > 3 && (
             <span className="text-[10px] text-zinc-500 py-1">+{entry.tags.length - 3}</span>
@@ -364,6 +373,7 @@ const App: React.FC = () => {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
 
   // Initial Load
   useEffect(() => {
@@ -396,6 +406,7 @@ const App: React.FC = () => {
     setUser(null);
     setView('auth');
     setEntries([]);
+    setFilterTag(null);
   };
 
   const handleSaveEntry = async () => {
@@ -438,9 +449,13 @@ const App: React.FC = () => {
       );
     }
 
+    const displayedEntries = filterTag 
+      ? entries.filter(e => e.tags?.includes(filterTag)) 
+      : entries;
+
     return (
       <div className="max-w-6xl mx-auto w-full animate-fade-in pb-24">
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
           <div>
             <h1 className="text-5xl font-bold font-sans tracking-tight mb-2">
               Hey, {user.name} <span className="inline-block animate-pulse">✨</span>
@@ -459,23 +474,50 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {entries.length === 0 ? (
+        {/* Filter Indicator */}
+        {filterTag && (
+          <div className="flex items-center gap-2 mb-8 animate-fade-in">
+            <span className="text-zinc-400 font-mono text-sm flex items-center gap-2"><Filter size={14}/> Filtered by:</span>
+            <button 
+              onClick={() => setFilterTag(null)}
+              className="flex items-center gap-2 bg-acid-green text-black px-4 py-2 rounded-full font-bold font-mono text-sm hover:opacity-90 transition-opacity"
+            >
+              #{filterTag} <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {displayedEntries.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 bg-white/5 rounded-[3rem] border border-dashed border-white/10">
-            <div className="bg-acid-green/10 p-6 rounded-full mb-6">
-              <Pencil size={40} className="text-acid-green" />
-            </div>
-            <h3 className="text-2xl font-bold mb-2">It's quiet... too quiet.</h3>
-            <p className="text-zinc-400 mb-8 font-mono">Start your first journal entry now.</p>
-            <Button onClick={() => setView('create')}>Create Entry</Button>
+            {filterTag ? (
+              <>
+                 <div className="bg-acid-green/10 p-6 rounded-full mb-6">
+                  <Hash size={40} className="text-acid-green" />
+                </div>
+                <h3 className="text-2xl font-bold mb-2">No vibes found here.</h3>
+                <p className="text-zinc-400 mb-8 font-mono">Try clearing the filter.</p>
+                <Button onClick={() => setFilterTag(null)}>Clear Filter</Button>
+              </>
+            ) : (
+              <>
+                <div className="bg-acid-green/10 p-6 rounded-full mb-6">
+                  <Pencil size={40} className="text-acid-green" />
+                </div>
+                <h3 className="text-2xl font-bold mb-2">It's quiet... too quiet.</h3>
+                <p className="text-zinc-400 mb-8 font-mono">Start your first journal entry now.</p>
+                <Button onClick={() => setView('create')}>Create Entry</Button>
+              </>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {entries.map((entry) => (
+            {displayedEntries.map((entry) => (
               <EntryCard 
                 key={entry.id} 
                 entry={entry} 
                 onClick={() => { setSelectedEntry(entry); setView('edit'); }}
                 onDelete={(e) => handleDeleteEntry(e, entry.id)}
+                onTagClick={(tag) => { setFilterTag(tag); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
               />
             ))}
           </div>
