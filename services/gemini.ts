@@ -1,6 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.API_KEY;
+// Safely access process.env to prevent "process is not defined" errors in browser
+let apiKey = '';
+try {
+  // Check if process exists before accessing it
+  if (typeof process !== 'undefined' && process.env) {
+    apiKey = process.env.API_KEY || '';
+  }
+} catch (e) {
+  console.warn("Could not read process.env");
+}
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
